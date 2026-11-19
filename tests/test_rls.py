@@ -2,10 +2,10 @@ import pytest
 
 from riad_data.rls import (
     READERS,
-    REGIONAL_TABLES,
     policy_statements,
     principal_statements,
     quote_upn,
+    regional_tables,
 )
 
 UPNS = ["north.mgr@example.onmicrosoft.com", "pricing.director@example.onmicrosoft.com"]
@@ -13,7 +13,14 @@ UPNS = ["north.mgr@example.onmicrosoft.com", "pricing.director@example.onmicroso
 
 def test_policy_filters_every_regional_table():
     policy = next(s for s in policy_statements() if s.startswith("CREATE SECURITY POLICY"))
-    for table in REGIONAL_TABLES:
+    assert regional_tables() == [
+        "fact_sales",
+        "supplier_costs",
+        "promotions",
+        "price_history",
+        "competitor_prices",
+    ]
+    for table in regional_tables():
         assert f"rls.fn_region_filter(region_id) ON dbo.{table}" in policy
     assert policy.endswith("WITH (STATE = ON)")
 
@@ -59,3 +66,15 @@ def test_principals_create_the_rls_schema_before_denying_it():
     create = sql.index("IF SCHEMA_ID('rls') IS NULL EXEC('CREATE SCHEMA rls')")
     deny = sql.index(f"DENY SELECT ON SCHEMA::rls TO {READERS}")
     assert create < deny
+
+
+def test_every_table_with_region_id_is_filtered_except_the_dimensions(monkeypatch):
+    from riad_data import rls, tables
+
+    extended = {**tables.COLUMNS, "new_regional": [("region_id", "char(1)"), ("x", "int")]}
+    monkeypatch.setattr(tables, "COLUMNS", extended)
+    monkeypatch.setattr(tables, "SCHEMA_OF", {**tables.SCHEMA_OF, "new_regional": "dbo"})
+    policy = next(s for s in rls.policy_statements() if s.startswith("CREATE SECURITY POLICY"))
+    assert "ON dbo.new_regional" in policy
+    for table in ("dim_region", "dim_store", "user_region"):
+        assert f"ON dbo.{table}" not in policy and f"ON rls.{table}" not in policy
