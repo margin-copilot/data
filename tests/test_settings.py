@@ -3,19 +3,19 @@ from riad_data import settings
 
 def test_env_file_then_environment_wins(tmp_path):
     env = tmp_path / ".env"
-    env.write_text('# comment\nFABRIC_LAKEHOUSE=from-file\nTENANT_ID="t-file"\n')
+    env.write_text('# comment\nSQL_DATABASE=from-file\nTENANT_ID="t-file"\n')
     values = settings.load(env, {"TENANT_ID": "t-env"})
-    assert values["FABRIC_LAKEHOUSE"] == "from-file"
+    assert values["SQL_DATABASE"] == "from-file"
     assert values["TENANT_ID"] == "t-env"
-    assert values["FABRIC_WORKSPACE"] == "margin-copilot"
+    assert values["USER_REGIONS"].startswith("north.mgr:N")
 
 
 def test_missing_settings_stop_with_their_names(tmp_path):
     values = settings.load(tmp_path / "absent.env", {})
     try:
-        settings.require(values, "TENANT_ID", "FABRIC_WORKSPACE")
+        settings.require(values, "TENANT_ID", "SQL_DATABASE")
     except SystemExit as stop:
-        assert "TENANT_ID" in str(stop) and "FABRIC_WORKSPACE" not in str(stop)
+        assert "TENANT_ID" in str(stop) and "SQL_DATABASE" not in str(stop)
     else:
         raise AssertionError("expected SystemExit")
 

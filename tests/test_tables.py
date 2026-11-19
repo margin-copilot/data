@@ -1,15 +1,13 @@
 import pytest
-from deltalake import DeltaTable
 
 from riad_data.generate import generate
-from riad_data.tables import SCHEMA_OF, onelake_uri, to_arrow, user_region_rows, write_tables
-
-USERS = "north.mgr:N,center.mgr:C,south.mgr:S,pricing.director:*"
-
-
-@pytest.fixture(scope="module")
-def tables():
-    return to_arrow(generate(), user_region_rows("example.onmicrosoft.com", USERS))
+from riad_data.tables import (
+    COLUMNS,
+    create_statements,
+    insert_statement,
+    rows_for,
+    user_region_rows,
+)
 
 
 def test_user_region_rows_come_from_config():
@@ -33,31 +31,25 @@ def test_bad_user_regions_are_rejected(domain, users):
         user_region_rows(domain, users)
 
 
-def test_every_table_converts_with_its_schema(tables):
-    assert tables["fact_sales"].num_rows == 98_460
-    assert str(tables["fact_sales"].schema.field("net_sales_mad").type) == "decimal128(12, 2)"
-    assert str(tables["fact_sales"].schema.field("sale_date").type) == "date32[day]"
-    assert tables["user_region"].num_rows == 4
-    assert SCHEMA_OF["user_region"] == "rls" and SCHEMA_OF["fact_sales"] == "dbo"
+def test_columns_match_the_generator_exactly():
+    data = generate()
+    for table, rows in data.tables.items():
+        assert [column for column, _ in COLUMNS[table]] == list(rows[0]), table
 
 
-def test_delta_tables_round_trip_with_a_protocol_fabric_reads(tmp_path, tables):
-    written = write_tables(str(tmp_path), tables)
-    assert "rls.user_region" in written and "dbo.fact_sales" in written
-    sales = DeltaTable(str(tmp_path / "Tables" / "dbo" / "fact_sales"))
-    assert sales.to_pyarrow_table().num_rows == 98_460
-    protocol = sales.protocol()
-    assert (protocol.min_reader_version, protocol.min_writer_version) == (1, 2)
-    assert not protocol.writer_features  # no timestampNtz or other features the endpoint can't read
+def test_create_statements_recreate_every_table_with_nullability():
+    statements = create_statements()
+    assert statements[0] == "IF SCHEMA_ID('rls') IS NULL EXEC('CREATE SCHEMA rls')"
+    fact = next(s for s in statements if s.startswith("CREATE TABLE dbo.fact_sales"))
+    assert "promo_id varchar(20) NULL" in fact and "units int NOT NULL" in fact
+    assert "net_sales_mad decimal(12,2) NOT NULL" in fact
+    assert "DROP TABLE IF EXISTS rls.user_region" in statements
+    assert sum(s.startswith("CREATE TABLE") for s in statements) == len(COLUMNS)
 
 
-def test_overwrite_replaces_rather_than_appends(tmp_path, tables):
-    write_tables(str(tmp_path), {"dim_region": tables["dim_region"]})
-    write_tables(str(tmp_path), {"dim_region": tables["dim_region"]})
+def test_inserts_use_parameters_in_column_order():
     assert (
-        DeltaTable(str(tmp_path / "Tables" / "dbo" / "dim_region")).to_pyarrow_table().num_rows == 3
+        insert_statement("dim_region")
+        == "INSERT INTO dbo.dim_region (region_id, name) VALUES (?, ?)"
     )
-
-
-def test_onelake_uri_uses_ids():
-    assert onelake_uri("ws-id", "lh-id") == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    assert rows_for("dim_region", [{"region_id": "N", "name": "North"}]) == [("N", "North")]

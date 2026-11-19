@@ -1,5 +1,5 @@
-"""T-SQL for region security on the lakehouse SQL endpoint (D-008): one filter predicate on every
-table with region_id, keyed on the caller's UPN via rls.user_region, which test users can't read."""
+"""T-SQL for region security in Azure SQL (D-008, D-031): every table with region_id is filtered by
+the caller's UPN through rls.user_region. Test users read dbo through a role and can't read rls."""
 
 import re
 
@@ -10,6 +10,7 @@ REGIONAL_TABLES = [
     "price_history",
     "competitor_prices",
 ]
+READERS = "pricing_readers"
 UPN = re.compile(r"^[a-z0-9][a-z0-9._-]*@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$")
 
 
@@ -19,21 +20,43 @@ def quote_upn(upn: str) -> str:
     return f"[{upn}]"
 
 
-def statements(denied_upns: list[str]) -> list[str]:
+def drop_statements() -> list[str]:
+    return [
+        "DROP SECURITY POLICY IF EXISTS rls.region_policy",
+        "DROP FUNCTION IF EXISTS rls.fn_region_filter",
+    ]
+
+
+def principal_statements(upns: list[str]) -> list[str]:
+    """Database users and the reader role. Run outside the load transaction; idempotent."""
+    quoted = [quote_upn(upn) for upn in upns]
+    return [
+        *(
+            f"IF DATABASE_PRINCIPAL_ID(N'{upn}') IS NULL "
+            f"EXEC(N'CREATE USER {name} FROM EXTERNAL PROVIDER')"
+            for upn, name in zip(upns, quoted, strict=True)
+        ),
+        f"IF DATABASE_PRINCIPAL_ID(N'{READERS}') IS NULL CREATE ROLE {READERS}",
+        *(f"ALTER ROLE {READERS} ADD MEMBER {name}" for name in quoted),
+        f"GRANT SELECT ON SCHEMA::dbo TO {READERS}",
+        f"DENY SELECT ON SCHEMA::rls TO {READERS}",
+    ]
+
+
+def policy_statements() -> list[str]:
+    """The filter: drop and recreate, inside the load transaction."""
     predicates = ",\n".join(
         f"ADD FILTER PREDICATE rls.fn_region_filter(region_id) ON dbo.{table}"
         for table in REGIONAL_TABLES
     )
     return [
-        "DROP SECURITY POLICY IF EXISTS rls.region_policy",
-        "DROP FUNCTION IF EXISTS rls.fn_region_filter",
-        "CREATE FUNCTION rls.fn_region_filter(@region_id AS varchar(8000))\n"
+        *drop_statements(),
+        "CREATE FUNCTION rls.fn_region_filter(@region_id AS char(1))\n"
         "RETURNS TABLE\n"
         "WITH SCHEMABINDING\n"
         "AS\n"
         "RETURN SELECT 1 AS allowed\n"
         "FROM rls.user_region AS m\n"
-        "WHERE m.upn = LOWER(USER_NAME()) AND (m.region_id = @region_id OR m.region_id = '*')",
+        "WHERE m.upn = LOWER(ORIGINAL_LOGIN()) AND (m.region_id = @region_id OR m.region_id = '*')",
         f"CREATE SECURITY POLICY rls.region_policy\n{predicates}\nWITH (STATE = ON)",
-        *(f"DENY SELECT ON rls.user_region TO {quote_upn(upn)}" for upn in denied_upns),
     ]

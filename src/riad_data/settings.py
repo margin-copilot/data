@@ -8,21 +8,14 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 NAMES = (
     "TENANT_ID",
     "DATA_TOOLS_CLIENT_ID",
-    "FABRIC_ADMIN_UPN",
-    "FABRIC_WORKSPACE",
-    "FABRIC_LAKEHOUSE",
-    "FABRIC_CAPACITY",
-    "VIEWER_GROUP_ID",
+    "ADMIN_UPN",
+    "SQL_SERVER",
+    "SQL_DATABASE",
     "ENTRA_DOMAIN",
     "USER_REGIONS",
-    "WORKSPACE_ID",
-    "LAKEHOUSE_ID",
-    "SQL_ENDPOINT_ID",
-    "SQL_ENDPOINT_HOST",
 )
 DEFAULTS = {
-    "FABRIC_WORKSPACE": "margin-copilot",
-    "FABRIC_LAKEHOUSE": "riad",
+    "SQL_DATABASE": "riad",
     "USER_REGIONS": "north.mgr:N,center.mgr:C,south.mgr:S,pricing.director:*",
 }
 
