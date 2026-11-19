@@ -52,3 +52,10 @@ def test_policy_is_rerunnable():
 def test_only_plain_lowercase_upns_reach_tsql(upn):
     with pytest.raises(ValueError):
         quote_upn(upn)
+
+
+def test_principals_create_the_rls_schema_before_denying_it():
+    sql = principal_statements(UPNS)
+    create = sql.index("IF SCHEMA_ID('rls') IS NULL EXEC('CREATE SCHEMA rls')")
+    deny = sql.index(f"DENY SELECT ON SCHEMA::rls TO {READERS}")
+    assert create < deny

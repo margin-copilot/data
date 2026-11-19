@@ -31,6 +31,7 @@ def principal_statements(upns: list[str]) -> list[str]:
     """Database users and the reader role. Run outside the load transaction; idempotent."""
     quoted = [quote_upn(upn) for upn in upns]
     return [
+        "IF SCHEMA_ID('rls') IS NULL EXEC('CREATE SCHEMA rls')",  # DENY below needs it on first load
         *(
             f"IF DATABASE_PRINCIPAL_ID(N'{upn}') IS NULL "
             f"EXEC(N'CREATE USER {name} FROM EXTERNAL PROVIDER')"
