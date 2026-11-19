@@ -3,10 +3,23 @@ user's token is never reused for another (CLAUDE.md). Retries while a paused dat
 
 import struct
 import time
+from pathlib import Path
 
 ACCESS_TOKEN = 1256  # SQL_COPT_SS_ACCESS_TOKEN
 SCOPE = "https://database.windows.net/.default"
 WAKING = "40613"  # database not currently available: the serverless database is resuming
+# The bundled macOS ODBC driver loads OpenSSL only from Homebrew's unversioned openssl link, which
+# can point at OpenSSL 4 (unsupported); macOS reads DYLD_LIBRARY_PATH only at process start.
+HOMEBREW_OPENSSL3 = Path("/opt/homebrew/opt/openssl@3/lib")
+
+
+def openssl3_env(platform: str, environ, lib_dir: Path = HOMEBREW_OPENSSL3) -> dict | None:
+    """Environment to restart with on macOS so the driver finds OpenSSL 3, or None if not needed."""
+    if platform != "darwin" or environ.get("DYLD_LIBRARY_PATH") == str(lib_dir):
+        return None
+    if not (lib_dir / "libssl.3.dylib").exists():
+        return None
+    return {**environ, "DYLD_LIBRARY_PATH": str(lib_dir)}
 
 
 def pack_token(token: str) -> bytes:

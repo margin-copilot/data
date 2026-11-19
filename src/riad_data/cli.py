@@ -2,6 +2,8 @@
 One browser sign-in as the database admin (ADMIN_USERS in the infra repo)."""
 
 import argparse
+import os
+import sys
 
 import msal
 
@@ -62,6 +64,8 @@ COMMANDS = {"load": load, "verify": verify}
 
 
 def main() -> None:
+    if env := sql.openssl3_env(sys.platform, os.environ):
+        os.execve(sys.executable, [sys.executable, *sys.argv], env)
     parser = argparse.ArgumentParser(prog="riad-data", description=__doc__)
     parser.add_argument("command", choices=list(COMMANDS))
     COMMANDS[parser.parse_args().command](settings.load())

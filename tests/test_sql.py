@@ -36,3 +36,20 @@ def test_retries_stop_after_the_last_attempt():
 
     with pytest.raises(RuntimeError):
         with_wake_retry(never_awake, attempts=3, sleep=lambda s: None)
+
+
+def test_macos_restart_points_the_driver_at_openssl_3(tmp_path):
+    from riad_data.sql import openssl3_env
+
+    (tmp_path / "libssl.3.dylib").touch()
+    env = openssl3_env("darwin", {"PATH": "/bin"}, tmp_path)
+    assert env == {"PATH": "/bin", "DYLD_LIBRARY_PATH": str(tmp_path)}
+
+
+def test_no_restart_on_linux_when_already_set_or_without_openssl_3(tmp_path):
+    from riad_data.sql import openssl3_env
+
+    (tmp_path / "libssl.3.dylib").touch()
+    assert openssl3_env("linux", {}, tmp_path) is None
+    assert openssl3_env("darwin", {"DYLD_LIBRARY_PATH": str(tmp_path)}, tmp_path) is None
+    assert openssl3_env("darwin", {}, tmp_path / "missing") is None
