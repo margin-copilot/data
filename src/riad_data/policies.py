@@ -3,6 +3,7 @@ document per clause, carrying the Entra group IDs allowed to read it."""
 
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from riad_data import settings
 POLICIES_DIR = Path(__file__).resolve().parents[2] / "policies"
 INDEX = "policies"
 SCOPE = "https://search.azure.com/.default"
+AUDIENCES = ("all", "north", "center", "south", "directors")
 
 
 @dataclass(frozen=True)
@@ -112,19 +114,39 @@ def index_definition() -> SearchIndex:
 
 def sync(index_client, search_client, docs: list[dict]) -> tuple[int, int]:
     """Creates or updates the index, uploads the corpus and removes clauses no longer in it."""
+    if not docs:
+        raise ValueError("no clauses to index; refusing to touch the index")
     index_client.create_or_update_index(index_definition())
     existing = {hit["id"] for hit in search_client.search(search_text="*", select=["id"], top=1000)}
     stale = sorted(existing - {doc["id"] for doc in docs})
-    search_client.merge_or_upload_documents(documents=docs)
+    # The service answers 207 with per-document results; a failed one could keep old group_ids.
+    _require_success(search_client.merge_or_upload_documents(documents=docs), "upload")
     if stale:
-        search_client.delete_documents(documents=[{"id": doc_id} for doc_id in stale])
+        deleted = search_client.delete_documents(documents=[{"id": doc_id} for doc_id in stale])
+        _require_success(deleted, "delete")
     return len(docs), len(stale)
 
 
+def _require_success(results, action: str) -> None:
+    failed = sorted(result.key for result in results if not result.succeeded)
+    if failed:
+        raise RuntimeError(f"{action} failed for {', '.join(failed)}")
+
+
 def policy_groups(values: dict[str, str]) -> dict[str, str]:
+    """Each audience maps to its own group: one ID shared by two audiences would widen access."""
     (raw,) = settings.require(values, "POLICY_GROUPS")
     pairs = (item.split(":", 1) for item in raw.split(",") if item.strip())
-    return {name.strip(): group_id.strip() for name, group_id in pairs}
+    groups = {name.strip(): group_id.strip() for name, group_id in pairs}
+    try:
+        ids = [str(uuid.UUID(groups[name])) for name in AUDIENCES]
+    except (KeyError, ValueError):
+        raise SystemExit(
+            f"POLICY_GROUPS needs a group ID for each of {', '.join(AUDIENCES)}"
+        ) from None
+    if len(set(ids)) != len(ids) or set(groups) != set(AUDIENCES):
+        raise SystemExit("POLICY_GROUPS needs five distinct group IDs, one per audience")
+    return dict(zip(AUDIENCES, ids, strict=True))
 
 
 class StaticToken:

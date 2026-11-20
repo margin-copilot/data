@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from riad_data.policies import documents, index_definition, load_corpus, policy_groups, sync
@@ -81,17 +83,21 @@ class FakeIndexClient:
 
 
 class FakeSearchClient:
-    def __init__(self, existing):
-        self.existing, self.uploaded, self.deleted = existing, [], []
+    def __init__(self, existing, failing=()):
+        self.existing, self.failing, self.uploaded, self.deleted = existing, set(failing), [], []
 
     def search(self, search_text, select, top):
         return [{"id": doc_id} for doc_id in self.existing]
 
     def merge_or_upload_documents(self, documents):
         self.uploaded.extend(documents)
+        return [
+            SimpleNamespace(key=d["id"], succeeded=d["id"] not in self.failing) for d in documents
+        ]
 
     def delete_documents(self, documents):
         self.deleted.extend(documents)
+        return [SimpleNamespace(key=d["id"], succeeded=True) for d in documents]
 
 
 def test_sync_uploads_the_corpus_and_deletes_stale_documents():
@@ -102,7 +108,40 @@ def test_sync_uploads_the_corpus_and_deletes_stale_documents():
     assert search_client.deleted == [{"id": "PP-99_1"}]
 
 
+IDS = [f"{n}{n}{n}{n}{n}{n}{n}{n}-0000-0000-0000-000000000000" for n in range(1, 6)]
+VALID = ",".join(
+    f"{name}:{gid}"
+    for name, gid in zip(("all", "north", "center", "south", "directors"), IDS, strict=True)
+)
+
+
 def test_policy_groups_setting_is_required_for_policies():
     with pytest.raises(SystemExit, match="POLICY_GROUPS"):
         policy_groups({})
-    assert policy_groups({"POLICY_GROUPS": "all:A, directors:D"}) == {"all": "A", "directors": "D"}
+    assert policy_groups({"POLICY_GROUPS": VALID})["directors"] == IDS[4]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        VALID.replace(IDS[4], IDS[0]),  # directors would open PP-06 to everyone
+        VALID.replace(IDS[2], "not-a-guid"),
+        VALID.rsplit(",", 1)[0],  # directors missing
+    ],
+)
+def test_policy_groups_must_be_five_distinct_group_ids(raw):
+    with pytest.raises(SystemExit, match="POLICY_GROUPS"):
+        policy_groups({"POLICY_GROUPS": raw})
+
+
+def test_sync_refuses_an_empty_corpus():
+    search_client = FakeSearchClient(["PP-04_1"])
+    with pytest.raises(ValueError, match="no clauses"):
+        sync(FakeIndexClient(), search_client, [])
+    assert search_client.deleted == []
+
+
+def test_sync_fails_when_any_clause_fails_to_upload():
+    search_client = FakeSearchClient([], failing={"PP-06_1"})
+    with pytest.raises(RuntimeError, match="PP-06_1"):
+        sync(FakeIndexClient(), search_client, documents(load_corpus(), GROUPS))
