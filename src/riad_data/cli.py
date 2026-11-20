@@ -1,25 +1,28 @@
-"""riad-data: loads Riad Market's data into Azure SQL with region security, and verifies it.
-One browser sign-in as the database admin (ADMIN_USERS in the infra repo)."""
+"""riad-data: loads Riad Market's data into Azure SQL with region security, verifies it, and
+pushes the policy corpus to AI Search. One browser sign-in as the admin (ADMIN_USERS in infra)."""
 
 import argparse
 import os
 import sys
 
 import msal
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes import SearchIndexClient
 
+from riad_data import policies as corpus
 from riad_data import settings, sql
 from riad_data.generate import generate
 from riad_data.load import load as load_dataset
 from riad_data.tables import user_region_rows
 
 
-def sign_in(values: dict[str, str]) -> str:
+def sign_in(values: dict[str, str], scope: str = sql.SCOPE) -> str:
     tenant, client = settings.require(values, "TENANT_ID", "DATA_TOOLS_CLIENT_ID")
     app = msal.PublicClientApplication(
         client, authority=f"https://login.microsoftonline.com/{tenant}"
     )
     result = app.acquire_token_interactive(
-        [sql.SCOPE], login_hint=values.get("ADMIN_UPN") or None, prompt="select_account"
+        [scope], login_hint=values.get("ADMIN_UPN") or None, prompt="select_account"
     )
     if "access_token" not in result:
         raise SystemExit(
@@ -60,7 +63,19 @@ def verify(values: dict[str, str]) -> None:
         connection.close()
 
 
-COMMANDS = {"load": load, "verify": verify}
+def policies(values: dict[str, str]) -> None:
+    (endpoint,) = settings.require(values, "SEARCH_ENDPOINT")
+    docs = corpus.documents(corpus.load_corpus(), corpus.policy_groups(values))
+    credential = corpus.StaticToken(sign_in(values, corpus.SCOPE))
+    with (
+        SearchIndexClient(endpoint, credential) as index_client,
+        SearchClient(endpoint, corpus.INDEX, credential) as search_client,
+    ):
+        uploaded, removed = corpus.sync(index_client, search_client, docs)
+    print(f"policies: {uploaded} clauses indexed, {removed} removed")
+
+
+COMMANDS = {"load": load, "verify": verify, "policies": policies}
 
 
 def main() -> None:

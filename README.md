@@ -28,6 +28,16 @@ The database's firewall admits one public IP. If yours changes (error 40615), re
 
 How region security fits the whole system: [security model](https://github.com/margin-copilot/docs/blob/main/security-model.md).
 
+## Policies
+
+`policies/*.md` holds Riad Market's seven pricing policies (46 clauses), transcribed from the [policy corpus](https://github.com/margin-copilot/docs). Each file has front matter (`id`, `title`, `audience`) and clauses as `## §N Title`, or `### N.M` sub-clauses under it. Audiences are `all`, `north`, `center`, `south` and `directors`; `POLICY_GROUPS` maps them to Entra group IDs.
+
+```bash
+uv run riad-data policies    # browser sign-in as the admin; pushes one AI Search document per clause
+```
+
+It creates or updates the `policies` index, uploads every clause with the group IDs allowed to read it, and removes clauses no longer in the corpus. The policy agent filters on the caller's groups (D-009, D-036 in the docs repo).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

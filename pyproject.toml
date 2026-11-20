@@ -3,6 +3,7 @@ name = "riad-data"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+  "azure-search-documents==12.1.0",
   "msal==1.39.0",
   "mssql-python==1.17.0",
 ]

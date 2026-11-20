@@ -13,6 +13,8 @@ NAMES = (
     "SQL_DATABASE",
     "ENTRA_DOMAIN",
     "USER_REGIONS",
+    "SEARCH_ENDPOINT",
+    "POLICY_GROUPS",
 )
 DEFAULTS = {
     "SQL_DATABASE": "riad",
